@@ -7,6 +7,7 @@ import gpytorch
 from .utils import get_batch_to_dataloader
 from utils import default_device
 from .utils import order_by_y, normalize_data, normalize_by_used_features_f, Binarize
+import pdb
 
 
 # We will use the simplest form of GP model, exact inference
@@ -17,7 +18,7 @@ class ExactGPModel(gpytorch.models.ExactGP):
         self.covar_module = gpytorch.kernels.ScaleKernel(gpytorch.kernels.RBFKernel())
 
     def forward(self, x):
-        mean_x = self.mean_module(x)
+        mean_x = self.mean_module(x) # [bs, seq_len]
         covar_x = self.covar_module(x)
         return gpytorch.distributions.MultivariateNormal(mean_x, covar_x)
 
@@ -50,12 +51,38 @@ def get_batch(batch_size, seq_len, num_features, device=default_device, hyperpar
         model.to(device)
         # trained_model = ExactGPModel(train_x, train_y, likelihood).cuda()
         # trained_model.eval()
-        with gpytorch.settings.prior_mode(True):
+        with gpytorch.settings.prior_mode(True):# This allows evaluating any Exact GP model in prior mode, even it if has training data / targets.
             d = model(x)
-            d = likelihood(d)
-            sample = d.sample().transpose(0, 1)
+            d = likelihood(d) # distribution model
+            sample = d.sample().transpose(0, 1) # [seq_len,bs], sample from above distribution
         #print(f'took {time.time() - start}')
-    return x.transpose(0, 1), sample, sample # x.shape = (T,B,H)
+    return x.transpose(0, 1), sample, sample # x.shape = (T,B,H); sample.shape = (T,B)
+    # return x, sample.transpose(0, 1), sample.transpose(0, 1) # batch is the first
+
+@torch.no_grad()
+def get_batch_first(batch_size, seq_len, num_features, device=default_device, hyperparameters=None, equidistant_x=False):
+    if isinstance(hyperparameters, (tuple, list)):
+        hyperparameters = {"noise": hyperparameters[0], "outputscale": hyperparameters[1], "lengthscale": hyperparameters[2]}
+    elif hyperparameters is None:
+        hyperparameters = {"noise": .1, "outputscale": .1, "lengthscale": .1}
+    with gpytorch.settings.fast_computations(*hyperparameters.get('fast_computations',(True,True,True))):
+        start = time.time()
+
+        if equidistant_x:
+            assert num_features == 1
+            x = torch.linspace(0,1.,seq_len).unsqueeze(0).repeat(batch_size,1).unsqueeze(-1)
+        else:
+            x = torch.rand(batch_size, seq_len, num_features, device=device)
+        model, likelihood = get_model(x, torch.Tensor(), hyperparameters)
+        model.to(device)
+        # trained_model = ExactGPModel(train_x, train_y, likelihood).cuda()
+        # trained_model.eval()
+        with gpytorch.settings.prior_mode(True):# This allows evaluating any Exact GP model in prior mode, even it if has training data / targets.
+            d = model(x)
+            d = likelihood(d) # distribution model
+            sample = d.sample().transpose(0, 1) # [seq_len,bs], sample from above distribution
+        #print(f'took {time.time() - start}')
+    return x, sample.transpose(0, 1), sample.transpose(0, 1) # batch is the first
 
 # TODO: Reintegrate this code
 # num_features_used = num_features_used_sampler()
@@ -78,6 +105,8 @@ def get_batch(batch_size, seq_len, num_features, device=default_device, hyperpar
 
 DataLoader = get_batch_to_dataloader(get_batch)
 DataLoader.num_outputs = 1
+DataLoader_batch_first = get_batch_to_dataloader(get_batch_first)
+DataLoader_batch_first.num_outputs = 1
 
 def get_model_on_device(x,y,hyperparameters,device):
     model, likelihood = get_model(x, y, hyperparameters)
@@ -95,8 +124,6 @@ def evaluate(x, y, y_non_noisy, use_mse=False, hyperparameters={}, get_model_on_
         for t in range(max(start_pos, 1), len(x), step_size):
             loss_sum = 0.
             model, likelihood = get_model_on_device(x[:t].transpose(0, 1), y[:t].transpose(0, 1), hyperparameters, device)
-
-
             model.eval()
             # print([t.shape for t in model.train_inputs])
             # print(x[:t].transpose(0,1).shape, x[t].unsqueeze(1).shape, y[:t].transpose(0,1).shape)

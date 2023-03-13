@@ -193,7 +193,7 @@ def compute_mean_and_conf_interval(accuracies, confidence=.95):
 
 
 def generate_toy_data(model, bptt, device='cpu'):
-    n_samples = 100
+    n_samples = 100 # 100 datasets
     X_list, y_list = [], []
     torch.manual_seed(0)
     for _ in range(0, n_samples):
@@ -281,13 +281,16 @@ def eval_transformer(X, y, device, model, training_samples_n):
     start = time.time()
     output = torch.cat(
         [model.to(device)((X_sample_chunk, y_sample_chunk), single_eval_pos=training_samples_n).squeeze(-1) for
-         (X_sample_chunk, y_sample_chunk) in samples], 1)
+         (X_sample_chunk, y_sample_chunk) in samples], 1) # x_sample_chunk:[100,1,3]
+    # output.shape:[num_points-single_eval_pos,num_datasets]
+    # model is pretrained, input new dataset(x and y) for test, divide the new dataset into train and test
+    # single_eval_pos is where the dataset is divided from
     elapsed = time.time() - start
 
     output = output.detach().cpu()
-    acc = ((torch.sigmoid(output) > 0.5) == y_sample[training_samples_n:].cpu().bool()).float().mean(axis=0)
+    acc = ((torch.sigmoid(output) > 0.5) == y_sample[training_samples_n:].cpu().bool()).float().mean(axis=0) # shape:[num_datasets]
     nll = nn.BCELoss(reduction='none')(torch.sigmoid(output.float()), y_sample[training_samples_n:].cpu().float()).mean(
-        axis=0)
+        axis=0) # shape:[num_datasets]
     return acc, nll, elapsed
 
 

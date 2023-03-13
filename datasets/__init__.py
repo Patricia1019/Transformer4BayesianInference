@@ -21,6 +21,7 @@ def get_openml(did, max_samples):
     X, y, categorical_indicator, attribute_names = dataset.get_data(
         dataset_format="array", target=dataset.default_target_attribute
     )
+    # to balance dataset
     X = X[y < 2]
     y = y[y < 2]
     sort = np.argsort(y) if y.mean() < 0.5 else np.argsort(-y)

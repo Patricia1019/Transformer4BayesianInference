@@ -4,12 +4,32 @@ import yaml
 
 import torch
 from torch import nn
-from transformer import TransformerModel
+from transformer import TransformerModel, MyTransformerModel
 from bar_distribution import BarDistribution, FullSupportBarDistribution, get_bucket_limits
 from utils import get_cosine_schedule_with_warmup, get_openai_lr, StoreDictKeyPair, get_weighted_single_eval_pos_sampler, get_uniform_single_eval_pos_sampler
 import priors
 import encoders
 import positional_encodings
+from tqdm import tqdm
+import pdb
+import logging
+
+def get_log(file_name):
+     logger = logging.getLogger('train')  # 设定logger的名字
+     logger.setLevel(logging.INFO)  # 设定logger得等级
+ 
+     ch = logging.StreamHandler()  # 输出流的hander，用与设定logger的各种信息
+     ch.setLevel(logging.INFO)  # 设定输出hander的level
+ 
+     fh = logging.FileHandler(file_name, mode='a')  # 文件流的hander，输出得文件名称，以及mode设置为覆盖模式
+     fh.setLevel(logging.INFO)  # 设定文件hander得lever
+ 
+     formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+     ch.setFormatter(formatter)  # 两个hander设置个是，输出得信息包括，时间，信息得等级，以及message
+     fh.setFormatter(formatter)
+     logger.addHandler(fh)  # 将两个hander添加到我们声明的logger中去
+     logger.addHandler(ch)
+     return logger
 
 class Losses():
     gaussian = nn.GaussianNLLLoss(full=True, reduction='none')
@@ -22,7 +42,7 @@ class Losses():
 def train(priordataloader_class, criterion, encoder_generator, emsize=200, nhid=200, nlayers=6, nhead=2, dropout=0.2,
           epochs=10, steps_per_epoch=100, batch_size=200, bptt=10, lr=None, warmup_epochs=10, input_normalization=False,
           y_encoder_generator=None, pos_encoder_generator=None, decoder=None, extra_prior_kwargs_dict={}, scheduler=get_cosine_schedule_with_warmup,
-          load_weights_from_this_state_dict=None, validation_period=10, single_eval_pos_gen=None, gpu_device='cuda:0',
+          load_weights_from_this_state_dict=None, validation_period=10, single_eval_pos_gen=None, gpu_device='cuda:3',device_ids=None,
           aggregate_k_gradients=1, verbose=True
           ):
 
@@ -45,9 +65,9 @@ def train(priordataloader_class, criterion, encoder_generator, emsize=200, nhid=
     model.criterion = criterion
     if load_weights_from_this_state_dict is not None:
         model.load_state_dict(load_weights_from_this_state_dict)
+    # model = torch.nn.DataParallel(model, device_ids=device_ids)
+    # device = f'cuda:{model.device_ids[0]}'
     model.to(device)
-
-
     # learning rate
     if lr is None:
         lr = get_openai_lr(model)
@@ -113,7 +133,7 @@ def train(priordataloader_class, criterion, encoder_generator, emsize=200, nhid=
     best_model = None
     total_loss = float('inf')
     total_positional_losses = float('inf')
-    for epoch in range(1, epochs + 1):
+    for epoch in tqdm(range(1, epochs + 1)):
         epoch_start_time = time.time()
         total_loss, total_positional_losses, time_to_get_batch, forward_time, step_time = train()
         if hasattr(dl, 'validate') and epoch % validation_period == 0:
@@ -122,17 +142,141 @@ def train(priordataloader_class, criterion, encoder_generator, emsize=200, nhid=
         else:
             val_score = None
 
-        if verbose:
+        if verbose and epoch % validation_period == 0:
             print('-' * 89)
             print(
                 f'| end of epoch {epoch:3d} | time: {(time.time() - epoch_start_time):5.2f}s | mean loss {total_loss:5.2f} | '
-                f"pos losses {','.join([f'{l:5.2f}' for l in total_positional_losses])}, lr {scheduler.get_last_lr()[0]}"
+                # f"pos losses {','.join([f'{l:5.2f}' for l in total_positional_losses])}, lr {scheduler.get_last_lr()[0]}"
+                f" lr {scheduler.get_last_lr()[0]}"
                 f' data time {time_to_get_batch:5.2f} step time {step_time:5.2f}'
                 f' forward time {forward_time:5.2f}' + (f'val score {val_score}' if val_score is not None else ''))
             print('-' * 89)
 
         scheduler.step()
-    return total_loss, total_positional_losses, model.to('cpu')
+    return total_loss, total_positional_losses, model
+
+def my_train(priordataloader_class, criterion, encoder_generator, emsize=200, nhid=200, nlayers=6, nhead=2, dropout=0.2,
+          epochs=10, steps_per_epoch=100, batch_size=200, bptt=10, lr=None, warmup_epochs=10, input_normalization=False,
+          y_encoder_generator=None, pos_encoder_generator=None, decoder=None, extra_prior_kwargs_dict={}, scheduler=get_cosine_schedule_with_warmup,
+          load_weights_from_this_state_dict=None, validation_period=10, single_eval_pos_gen=None, gpu_device='cuda:0',device_ids=None,
+          aggregate_k_gradients=1, verbose=True, data_augment = True
+          ):
+    device = gpu_device if torch.cuda.is_available() else 'cpu:0'
+    print(f'Using {device} device')
+    dl = priordataloader_class(num_steps=steps_per_epoch, batch_size=batch_size, seq_len=bptt, **extra_prior_kwargs_dict)
+
+    encoder = encoder_generator(dl.num_features+1 if dl.fuse_x_y else dl.num_features,emsize)
+    n_out = dl.num_outputs
+    if isinstance(criterion, nn.GaussianNLLLoss):
+        n_out *= 2
+    elif isinstance(criterion, BarDistribution) or "BarDistribution" in criterion.__class__.__name__: # TODO remove this fix (only for dev)
+        assert n_out == 1
+        n_out = criterion.num_bars
+    model = MyTransformerModel(encoder, n_out, emsize, nhead, nhid, nlayers, dropout,
+                             y_encoder=y_encoder_generator(1, emsize), input_normalization=input_normalization,
+                             pos_encoder=(pos_encoder_generator or positional_encodings.NoPositionalEncoding)(emsize, bptt*2),
+                             decoder=decoder
+                             )
+    model.criterion = criterion
+    if load_weights_from_this_state_dict is not None:
+        model.load_state_dict(load_weights_from_this_state_dict)
+
+    # device = f'cuda:{model.device_ids[0]}'
+    device = torch.device("cuda")
+    model = torch.nn.DataParallel(model, device_ids=device_ids).to(device)
+    # learning rate
+    if lr is None:
+        lr = get_openai_lr(model)
+        print(f"Using OpenAI max lr of {lr}.")
+    optimizer = torch.optim.Adam(model.parameters(), lr=lr)
+    scheduler = scheduler(optimizer, warmup_epochs, epochs)
+
+    def my_train():
+        model.train()  # Turn on the train mode
+        total_loss = 0.
+        total_positional_losses = 0.
+        total_positional_losses_recorded = 0
+        start_time = time.time()
+        before_get_batch = time.time()
+        assert len(dl) % aggregate_k_gradients == 0, 'Please set the number of steps per epoch s.t. `aggregate_k_gradients` divides it.'
+        for batch, (data, targets) in enumerate(dl):
+            targets = targets.transpose(0,1)
+            time_to_get_batch = time.time() - before_get_batch
+            before_forward = time.time()
+            single_eval_pos = single_eval_pos_gen() if callable(single_eval_pos_gen) else single_eval_pos_gen
+            # output1,output2 = model(tuple(e.to(device) for e in data) if isinstance(data, tuple) else data.to(device)
+            #                , single_eval_pos=single_eval_pos, data_augment=data_augment)
+            output1,output2 = model(tuple(e.cuda() for e in data) if isinstance(data, tuple) else data.cuda()
+                           , single_eval_pos=single_eval_pos, data_augment=data_augment)
+
+            forward_time = time.time() - before_forward
+
+            if single_eval_pos is not None:
+                targets = targets[single_eval_pos:]
+            if isinstance(criterion, nn.GaussianNLLLoss):
+                assert output.shape[-1] == 2, \
+                    'need to write a little bit of code to handle multiple regression targets at once'
+
+                mean_pred = output[..., 0]
+                var_pred = output[..., 1].abs()
+                losses = criterion(mean_pred.flatten(), targets.to(device).flatten(), var=var_pred.flatten())
+            elif isinstance(criterion, (nn.MSELoss, nn.BCEWithLogitsLoss)):
+                losses = criterion(output.flatten(), targets.to(device).flatten())
+            else:
+                losses1 = criterion(output1.transpose(0,1).reshape(-1, n_out), targets.to(device).flatten()) # output.shape[len(x_src)-single_eval_pos,bs,num_borders]
+                if output2 != None:
+                    losses2 = criterion(output2.transpose(0,1).reshape(-1, n_out), targets.to(device).flatten()) # output.shape[len(x_src)-single_eval_pos,bs,num_borders]
+            losses1 = losses1.view(*output1.transpose(0,1).shape[0:2]).squeeze(-1)
+            if output2 != None:
+                losses2 = losses2.view(*output2.transpose(0,1).shape[0:2]).squeeze(-1)
+                loss = (losses1.mean() + losses2.mean())/2
+            else:
+                loss = losses1.mean()
+            loss.backward()
+            if batch % aggregate_k_gradients == aggregate_k_gradients - 1:
+                torch.nn.utils.clip_grad_norm_(model.parameters(), 1.)
+                optimizer.step()
+                optimizer.zero_grad()
+
+            step_time = time.time() - before_forward
+
+            total_loss += loss.item()
+            total_positional_losses += losses.mean(1).cpu().detach() if single_eval_pos is None else \
+                nn.functional.one_hot(torch.tensor(single_eval_pos), bptt)*loss.cpu().detach()
+
+            total_positional_losses_recorded += torch.ones(bptt) if single_eval_pos is None else \
+                nn.functional.one_hot(torch.tensor(single_eval_pos), bptt)
+
+            before_get_batch = time.time()
+        return total_loss / steps_per_epoch, (
+                    total_positional_losses / total_positional_losses_recorded).tolist(), time_to_get_batch, forward_time, step_time
+
+    best_val_loss = float("inf")
+    best_model = None
+    total_loss = float('inf')
+    total_positional_losses = float('inf')
+    for epoch in tqdm(range(1, epochs + 1)):
+        epoch_start_time = time.time()
+        total_loss, total_positional_losses, time_to_get_batch, forward_time, step_time = my_train()
+        if hasattr(dl, 'validate') and epoch % validation_period == 0:
+            with torch.no_grad():
+                val_score = dl.validate(model)
+        else:
+            val_score = None
+
+        if verbose and epoch % validation_period == 0:
+            print('-' * 89)
+            print(
+                f'| end of epoch {epoch:3d} | time: {(time.time() - epoch_start_time):5.2f}s | mean loss {total_loss:5.2f} | '
+                # f"pos losses {','.join([f'{l:5.2f}' for l in total_positional_losses])}, lr {scheduler.get_last_lr()[0]}"
+                f" lr {scheduler.get_last_lr()[0]}"
+                f' data time {time_to_get_batch:5.2f} step time {step_time:5.2f}'
+                f' forward time {forward_time:5.2f}' + (f'val score {val_score}' if val_score is not None else ''))
+            print('-' * 89)
+
+        scheduler.step()
+
+    return total_loss, total_positional_losses, model
 
 def _parse_args(config_parser, parser):
     # Do we have a config file to parse?

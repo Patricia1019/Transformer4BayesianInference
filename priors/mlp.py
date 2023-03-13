@@ -9,7 +9,7 @@ from utils import default_device
 from .utils import get_batch_to_dataloader
 from .utils import order_by_y, normalize_data, normalize_by_used_features_f, Binarize
 from .utils import trunc_norm_sampler_f, beta_sampler_f, gamma_sampler_f, uniform_sampler_f, zipf_sampler_f, scaled_beta_sampler_f, uniform_int_sampler_f
-
+import pdb
 
 def canonical_pre_processing(x, canonical_args):
     assert x.shape[2] == len(canonical_args)
@@ -195,7 +195,6 @@ def get_batch(batch_size, seq_len, num_features, device=default_device, hyperpar
     models = [get_model() for _ in range(num_models)]
 
     sample = sum([[model() for _ in range(0,batch_size_per_gp_sample)] for model in models],[])
-
     x, y = zip(*sample)
     y = torch.cat(y, 1).squeeze(-1).detach()
     x = torch.cat(x, 1).detach()

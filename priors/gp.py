@@ -25,7 +25,7 @@ def get_batch(batch_size, seq_len, num_features, noisy_std=None):
     # gp_b = TensorGP(kernel=TensorRBF(noisy_std))
     # y_t = gp_b.sample_from_GP_prior(x_t).detach()
 
-    gpr = get_gp(noisy_std)
+    gpr = get_gp(noisy_std) # length_scale in RBF kernel, representing the l, the std in the noise
     y_t = torch.zeros(batch_size, seq_len)
 
     for i in range(len(y_t)):

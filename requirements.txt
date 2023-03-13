@@ -1,7 +1,7 @@
 # Recommend to use python >= 3.9
-gpytorch==1.5.0
+gpytorch==1.6.0
 pyro-ppl==1.7.0
-torch==1.9.0
+torch==1.11.0 # conda install pytorch==1.11.0 cudatoolkit=11.3 -c pytorch
 scikit-learn==0.24.2
 pyyaml==5.4.1
 blitz-bayesian-pytorch==0.2.7

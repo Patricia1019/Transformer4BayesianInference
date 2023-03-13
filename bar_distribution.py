@@ -1,6 +1,7 @@
 
 import torch
 from torch import nn
+import pdb
 
 class BarDistribution(nn.Module):
     def __init__(self, borders: torch.Tensor): # here borders should start with min and end with max, where all values lie in (min,max) and are sorted
@@ -13,7 +14,7 @@ class BarDistribution(nn.Module):
         self.register_buffer('bucket_widths', self.borders[1:] - self.borders[:-1])
         full_width = self.bucket_widths.sum()
         assert (full_width - (self.borders[-1] - self.borders[0])).abs() < 1e-4, f'diff: {full_width - (self.borders[-1] - self.borders[0])}'
-        assert (torch.argsort(borders) == torch.arange(len(borders))).all(), "Please provide sorted borders!"
+        assert (torch.argsort(borders).cpu() == torch.arange(len(borders))).all(), "Please provide sorted borders!"
         self.num_bars = len(borders) - 1
 
     def map_to_bucket_idx(self, y):
