@@ -40,7 +40,7 @@ def run_test(model,data_augment=True,device='cuda:0',step_size=100, start_pos=50
         if isinstance(model.criterion,nn.GaussianNLLLoss):
             nll = model.criterion(logits[0][...,0], target_y[eval_pos], var=logits[0][...,1].abs())
             return nll, 0., 0.
-        logits = logits.transpose(0,1)
+        logits = logits.transpose(0,1) # [seq_len-single_eval_pos,bs,border_num]
         means = model.criterion.mean(logits) # num_evals x batch_size
         maxs = (model.criterion.borders[logits.argmax(-1)] + model.criterion.borders[logits.argmax(-1)+1])/2
         mse = nn.MSELoss()
@@ -88,9 +88,9 @@ if __name__ == "__main__":
     # num_border_list = [1000,10000]
     num_border_list = [1000]
     # epoch_list = [50,100,200,400]
-    epoch_list = [200]
+    epoch_list = [400]
     batch_fraction = 8
-    draw_flag = False
+    draw_flag = True
     data_augment = False
     for num_borders in num_border_list:
         model = MyTransformerModel(encoder, num_borders, emsize, 4, 2*emsize, 6, 0.0,

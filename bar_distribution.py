@@ -59,7 +59,7 @@ class BarDistribution(nn.Module):
         for p,cp,f_p,f_cp in zip(probs, cumprobs, flipped_probs, flipped_cumprobs):
             r = find_lower_quantile(p, cp, side_prob, self.borders), find_lower_quantile(f_p, f_cp, side_prob, self.borders.flip(0))
             results.append(r)
-
+            
         return torch.tensor(results).reshape(*logits_shape[:-1],2)
 
     def mode(self, logits):

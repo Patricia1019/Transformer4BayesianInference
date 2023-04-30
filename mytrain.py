@@ -90,18 +90,18 @@ def run_test(model,device='cuda:0',step_size=100, start_pos=1, batch_size=1000, 
     return eval_positions, torch.stack(mses).to('cpu'), torch.stack(max_mses).to('cpu'), torch.stack(nlls).to('cpu'), torch.tensor(nll_confidences).to('cpu')
 
 if __name__ == "__main__":
-    num_features = 5
+    num_features = 2
     hps = {'noise': 1e-4, 'outputscale': 1., 'lengthscale': .6, 'fast_computations': (False,False,False)}
     ys = priors.fast_gp.get_batch(100000,20,num_features, hyperparameters=hps)[1]
     kwargs = {'nlayers': 6, 'dropout': 0.0, 'steps_per_epoch': 100, }
     device_ids = [0, 1, 2, 3]
     batch_fraction = 8
-    out_dir = './myresults/GPfitting_parallel_test'
-    if not os.path.exists(out_dir):
-        os.makedirs(out_dir)
     num_border_list = [1000]
     epoch_list = [50,100,200]
-    data_augment =False
+    data_augment = True
+    out_dir = f'./myresults/GPfitting_augment{data_augment}_{num_features}feature'
+    if not os.path.exists(out_dir):
+        os.makedirs(out_dir)
     for num_borders in num_border_list:
         for lr in [.0001*batch_fraction]:
             for epochs in [int(x*25/batch_fraction) for x in epoch_list]:
