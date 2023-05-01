@@ -63,7 +63,7 @@ def run_test(model,data_augment=True,device='cuda:0',step_size=100, start_pos=50
             nll.append(batch_nll)
             mean_mse.append(batch_mean_mse)
             max_mse.append(batch_max_mse)
-
+            
         nll = torch.cat(nll)
         # mean_mse = torch.tensor(mean_mse).mean()
         # max_mse = torch.tensor(max_mse).mean()
