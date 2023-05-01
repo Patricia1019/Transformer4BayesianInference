@@ -84,13 +84,13 @@ if __name__ == "__main__":
     fig3, ax3 = plt.subplots()
     fig4, ax4 = plt.subplots()
     root_dir = './myresults/GPfitting_parallel'
-    logger = get_log(f'{root_dir}/test_log.txt')
+    logger = get_log(f'{root_dir}/test_log_test.txt')
     # num_border_list = [1000,10000]
     num_border_list = [1000]
     # epoch_list = [50,100,200,400]
-    epoch_list = [400]
+    epoch_list = [50]
     batch_fraction = 8
-    draw_flag = True
+    draw_flag = False
     data_augment = False
     for num_borders in num_border_list:
         model = MyTransformerModel(encoder, num_borders, emsize, 4, 2*emsize, 6, 0.0,

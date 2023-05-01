@@ -90,7 +90,7 @@ def run_test(model,device='cuda:0',step_size=100, start_pos=1, batch_size=1000, 
     return eval_positions, torch.stack(mses).to('cpu'), torch.stack(max_mses).to('cpu'), torch.stack(nlls).to('cpu'), torch.tensor(nll_confidences).to('cpu')
 
 if __name__ == "__main__":
-    num_features = 2
+    num_features = 7
     hps = {'noise': 1e-4, 'outputscale': 1., 'lengthscale': .6, 'fast_computations': (False,False,False)}
     ys = priors.fast_gp.get_batch(100000,20,num_features, hyperparameters=hps)[1]
     kwargs = {'nlayers': 6, 'dropout': 0.0, 'steps_per_epoch': 100, }
