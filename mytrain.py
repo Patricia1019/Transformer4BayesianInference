@@ -90,23 +90,23 @@ def run_test(model,device='cuda:0',step_size=100, start_pos=1, batch_size=1000, 
     return eval_positions, torch.stack(mses).to('cpu'), torch.stack(max_mses).to('cpu'), torch.stack(nlls).to('cpu'), torch.tensor(nll_confidences).to('cpu')
 
 if __name__ == "__main__":
-    num_features = 7
+    num_features = 5
     hps = {'noise': 1e-4, 'outputscale': 1., 'lengthscale': .6, 'fast_computations': (False,False,False)}
-    ys = priors.fast_gp.get_batch(100000,20,num_features, hyperparameters=hps)[1]
+    ys = priors.fast_gp_mix.get_batch(100000,20,num_features, hyperparameters=hps)[1]
     kwargs = {'nlayers': 6, 'dropout': 0.0, 'steps_per_epoch': 100, }
     device_ids = [0, 1, 2, 3]
     batch_fraction = 8
     num_border_list = [1000]
     epoch_list = [50,100,200]
     data_augment = True
-    out_dir = f'./myresults/GPfitting_augment{data_augment}_{num_features}feature'
+    out_dir = f'./myresults/GPmix_augment{data_augment}_{num_features}feature'
     if not os.path.exists(out_dir):
         os.makedirs(out_dir)
     for num_borders in num_border_list:
         for lr in [.0001*batch_fraction]:
             for epochs in [int(x*25/batch_fraction) for x in epoch_list]:
                 print(f'num_borders={num_borders}, lr={lr}, epochs={epochs}')
-                total_loss, total_positional_losses, model = my_train(priors.fast_gp.DataLoader_batch_first, bar_distribution.FullSupportBarDistribution(bar_distribution.get_bucket_limits(num_borders, ys=ys)), encoder_generator=encoders.Linear, emsize=512, nhead=4, warmup_epochs=epochs//4, y_encoder_generator=encoders.Linear, pos_encoder_generator=positional_encodings.NoPositionalEncoding,
+                total_loss, total_positional_losses, model = my_train(priors.fast_gp_mix.DataLoader_batch_first, bar_distribution.FullSupportBarDistribution(bar_distribution.get_bucket_limits(num_borders, ys=ys)), encoder_generator=encoders.Linear, emsize=512, nhead=4, warmup_epochs=epochs//4, y_encoder_generator=encoders.Linear, pos_encoder_generator=positional_encodings.NoPositionalEncoding,
                             batch_size=4*batch_fraction, scheduler=utils.get_cosine_schedule_with_warmup, extra_prior_kwargs_dict={'num_features': num_features, 'fuse_x_y': False, 'hyperparameters': hps},device_ids=device_ids,
                             epochs = epochs, 
                             data_augment = data_augment,

@@ -259,8 +259,9 @@ def my_train(priordataloader_class, criterion, encoder_generator, emsize=200, nh
         epoch_start_time = time.time()
         total_loss, total_positional_losses, time_to_get_batch, forward_time, step_time = my_train()
         if hasattr(dl, 'validate') and epoch % validation_period == 0:
-            with torch.no_grad():
-                val_score = dl.validate(model)
+            # with torch.no_grad():
+            #     val_score = dl.validate(model)
+            val_score = None
         else:
             val_score = None
 

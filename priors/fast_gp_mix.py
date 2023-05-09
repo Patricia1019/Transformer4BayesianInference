@@ -133,6 +133,84 @@ def get_batch(batch_size, seq_len, num_features, device=default_device, hyperpar
         target_sample = sample
     return x, sample, target_sample # x.shape = (T,B,H)
 
+@torch.no_grad()
+def get_batch_first(batch_size, seq_len, num_features, device=default_device, hyperparameters=None,
+              batch_size_per_gp_sample=None, num_outputs=1,
+              fix_to_range=None, equidistant_x=False):
+    '''
+    This function is very similar to the equivalent in .fast_gp. The only difference is that this function operates over
+    a mixture of GP priors.
+    :param batch_size:
+    :param seq_len:
+    :param num_features:
+    :param device:
+    :param hyperparameters:
+    :param for_regression:
+    :return:
+    '''
+    assert num_outputs == 1
+    hyperparameters = hyperparameters or {}
+    with gpytorch.settings.fast_computations(*hyperparameters.get('fast_computations',(True,True,True))):
+        batch_size_per_gp_sample = (batch_size_per_gp_sample or max(batch_size // 8,1))
+        assert batch_size % batch_size_per_gp_sample == 0
+
+        total_num_candidates = batch_size*(2**(fix_to_range is not None))
+        num_candidates = batch_size_per_gp_sample * (2**(fix_to_range is not None))
+        if equidistant_x:
+            assert num_features == 1
+            x = torch.linspace(0,1.,seq_len).unsqueeze(0).repeat(total_num_candidates,1).unsqueeze(-1)
+        else:
+            x = torch.rand(total_num_candidates, seq_len, num_features, device=device)
+        samples = []
+        for i in range(0,total_num_candidates,num_candidates):
+            model, likelihood = get_model(x[i:i+num_candidates], torch.zeros(num_candidates,x.shape[1]), hyperparameters)
+            #print(model.covar_module.base_kernel.lengthscale)
+            model.to(device)
+            # trained_model = ExactGPModel(train_x, train_y, likelihood).cuda()
+            # trained_model.eval()
+            successful_sample = 0
+            throwaway_share = 0.
+            while successful_sample < 1:
+                with gpytorch.settings.prior_mode(True):
+                    d = model(x[i:i+num_candidates])
+                    d = likelihood(d)
+                    sample = d.sample() # bs_per_gp_s x T
+                    if hyperparameters.get('y_minmax_norm'):
+                        sample = ((sample - sample.min(1)[0]) / (sample.max(1)[0] - sample.min(1)[0]))
+                    if hyperparameters.get('sigmoid'):
+                        sample = sample.sigmoid()
+                    if fix_to_range is None:
+                        samples.append(sample.transpose(0, 1))
+                        successful_sample = True
+                        continue
+                    smaller_mask = sample < fix_to_range[0]
+                    larger_mask = sample >= fix_to_range[1]
+                    in_range_mask = ~ (smaller_mask | larger_mask).any(1)
+                    throwaway_share += (~in_range_mask[:batch_size_per_gp_sample]).sum()/batch_size_per_gp_sample
+                    if in_range_mask.sum() < batch_size_per_gp_sample:
+                        successful_sample -= 1
+                        if successful_sample < 100:
+                            print("Please change hyper-parameters (e.g. decrease outputscale_mean) it"
+                                  "seems like the range is set to tight for your hyper-parameters.")
+                        continue
+
+                    x[i:i+batch_size_per_gp_sample] = x[i:i+num_candidates][in_range_mask][:batch_size_per_gp_sample]
+                    sample = sample[in_range_mask][:batch_size_per_gp_sample]
+                    samples.append(sample.transpose(0, 1))
+                    successful_sample = True
+        if random.random() < .01:
+            print('throwaway share', throwaway_share/(batch_size//batch_size_per_gp_sample))
+
+        #print(f'took {time.time() - start}')
+        sample = torch.cat(samples, 1)
+        x = x.view(-1,batch_size,seq_len,num_features)[0]
+        # TODO think about enabling the line below
+        #sample = sample - sample[0, :].unsqueeze(0).expand(*sample.shape)
+        x = x.transpose(0,1)
+        assert x.shape[:2] == sample.shape[:2]
+        target_sample = sample
+    return x.transpose(0,1), sample.transpose(0,1), target_sample.transpose(0,1) # x.shape = (T,B,H)
+
 
 class DataLoader(get_batch_to_dataloader(get_batch)):
     num_outputs = 1
@@ -144,6 +222,26 @@ class DataLoader(get_batch_to_dataloader(get_batch)):
             losses = []
             for eval_pos in range(start_pos, len(x), step_size):
                 logits = model((x,y), single_eval_pos=eval_pos)
+                means = model.criterion.mean(logits) # num_evals x batch_size
+                mse = nn.MSELoss()
+                losses.append(mse(means[0], target_y[eval_pos]))
+            model.train()
+            return torch.stack(losses)
+        else:
+            return 123.
+
+class DataLoader_batch_first(get_batch_to_dataloader(get_batch_first)):
+    num_outputs = 1
+    @torch.no_grad()
+    def validate(self, model, step_size=1, start_pos=0):
+        if isinstance(model.criterion, BarDistribution):
+            (x,y), target_y = self.gbm(**self.get_batch_kwargs, fuse_x_y=self.fuse_x_y)
+            model.eval()
+            losses = []
+            target_y = target_y.transpose(0,1)
+            for eval_pos in range(start_pos, len(x), step_size):
+                logits,_ = model((x,y), single_eval_pos=eval_pos)
+                logits = logits.transpose(0,1)
                 means = model.criterion.mean(logits) # num_evals x batch_size
                 mse = nn.MSELoss()
                 losses.append(mse(means[0], target_y[eval_pos]))
