@@ -29,7 +29,7 @@ from sklearn.gaussian_process import GaussianProcessClassifier
 from sklearn.gaussian_process.kernels import RBF
 from sklearn.metrics import accuracy_score, roc_auc_score
 
-import xgboost as xgb
+# import xgboost as xgb
 import matplotlib.pyplot as plt
 
 CV = 5
